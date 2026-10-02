@@ -38,5 +38,16 @@ public class GlobalExceptionHandler {
                 400,
                 ex.getMessage()
         );
+
+
+    }
+
+    @ExceptionHandler(IdempotencyConflictException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public ApiError handleIdempotencyConflict(IdempotencyConflictException ex) {
+        return new ApiError(
+                409,
+                ex.getMessage()
+        );
     }
 }

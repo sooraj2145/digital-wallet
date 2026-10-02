@@ -3,6 +3,7 @@ package com.wallet.service;
 
 import com.wallet.entity.LedgerEntry;
 import com.wallet.entity.LedgerEntryType;
+import com.wallet.exception.IdempotencyConflictException;
 import com.wallet.exception.InsufficientBalanceException;
 import com.wallet.exception.InvalidTransferException;
 import com.wallet.exception.WalletNotFoundException;
@@ -14,10 +15,13 @@ import com.wallet.repository.TransactionRepository;
 import com.wallet.dto.TransferRequest;
 import com.wallet.entity.Wallet;
 import com.wallet.repository.WalletRepository;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import javax.swing.text.html.Option;
 import java.math.BigDecimal;
+import java.util.Optional;
 
 @Service
 public class TransferService {
@@ -37,7 +41,18 @@ public class TransferService {
     }
 
     @Transactional
-    public void transfer(TransferRequest request) {
+    public Transaction transfer(TransferRequest request) {
+
+
+
+        Optional<Transaction> existingTransaction =
+                transactionRepository.findByIdempotencyKey(
+                        request.idempotencyKey()
+                );
+
+        if (existingTransaction.isPresent()) {
+            return existingTransaction.get();
+        }
 
         Long sourceWalletId = request.sourceWalletId();
         Long destinationWalletId = request.destinationWalletId();
@@ -97,10 +112,17 @@ public class TransferService {
         Transaction transaction = new Transaction(
                 TransactionType.TRANSFER,
                 amount,
-                sourceWallet.getCurrency()
+                sourceWallet.getCurrency(),
+                request.idempotencyKey()
         );
 
-        transactionRepository.save(transaction);
+        try {
+            transactionRepository.save(transaction);
+        } catch (DataIntegrityViolationException exception) {
+            throw new IdempotencyConflictException(
+                    "A transaction with this idempotency key already exists"
+            );
+        }
 
         LedgerEntry ledgerEntry = new LedgerEntry(
                 transaction,
@@ -129,7 +151,7 @@ public class TransferService {
         );
 
 
-
+        return transaction;
     }
 
 

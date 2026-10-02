@@ -29,6 +29,10 @@ public class Transaction {
     @Column(nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
+    @Column(nullable = false, unique = true, length = 100)
+    private String idempotencyKey;
+
+
     @PrePersist
     protected void onCreate() {
         createdAt = LocalDateTime.now();
@@ -36,10 +40,11 @@ public class Transaction {
 
     public Transaction() {}
 
-    public Transaction(TransactionType type, BigDecimal amount, Currency currency) {
+    public Transaction(TransactionType type, BigDecimal amount, Currency currency, String idempotencyKey) {
         this.type = type;
         this.amount = amount;
         this.currency = currency;
+        this.idempotencyKey = idempotencyKey;
     }
 
     public UUID getId() {
@@ -60,6 +65,10 @@ public class Transaction {
 
     public LocalDateTime getCreatedAt() {
         return createdAt;
+    }
+
+    public String getIdempotencyKey() {
+        return idempotencyKey;
     }
 
 
