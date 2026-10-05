@@ -1,7 +1,9 @@
 package com.wallet.controller;
 
 
+import com.wallet.dto.TransactionResponse;
 import com.wallet.dto.TransferRequest;
+import com.wallet.entity.Transaction;
 import com.wallet.service.TransferService;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
@@ -21,10 +23,18 @@ public class TransferController {
     }
 
     @PostMapping
-    public ResponseEntity<Void> transfer(
+    public TransactionResponse createTransfer(
             @Valid @RequestBody TransferRequest request
             ) {
-        transferService.transfer(request);
-        return ResponseEntity.ok().build();
+        Transaction transaction = transferService.transfer(request);
+
+        return new TransactionResponse(
+                transaction.getId(),
+                transaction.getType(),
+                transaction.getAmount(),
+                transaction.getCurrency(),
+                transaction.getIdempotencyKey(),
+                transaction.getCreatedAt()
+        );
     }
 }
