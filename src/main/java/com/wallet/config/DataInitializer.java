@@ -1,11 +1,13 @@
 package com.wallet.config;
 
 
+import com.wallet.dto.DepositRequest;
 import com.wallet.entity.Currency;
 import com.wallet.entity.User;
 import com.wallet.entity.Wallet;
 import com.wallet.repository.UserRepository;
 import com.wallet.repository.WalletRepository;
+import com.wallet.service.WalletService;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -18,7 +20,8 @@ public class DataInitializer {
     @Bean
     CommandLineRunner initializeData(
             UserRepository userRepository,
-            WalletRepository walletRepository
+            WalletRepository walletRepository,
+            WalletService walletService
     ) {
 
         return args -> {
@@ -47,13 +50,14 @@ public class DataInitializer {
                     new Wallet(user1, Currency.USD)
             );
 
-            wallet1.setBalance(new BigDecimal("1000.00"));
-            wallet2.setBalance(new BigDecimal("0.00"));
-            wallet3.setBalance(new BigDecimal("1000.00"));
 
-            walletRepository.save(wallet1);
-            walletRepository.save(wallet2);
-            walletRepository.save(wallet3);
+            walletService.deposit(
+                    wallet1.getId(),
+                    new DepositRequest(
+                            new BigDecimal("1000.00"),
+                            "initializer-alice-opening-balance"
+                    )
+            );
         };
     }
 }

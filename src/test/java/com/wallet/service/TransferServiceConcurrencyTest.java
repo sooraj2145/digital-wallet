@@ -1,9 +1,9 @@
 package com.wallet.service;
 
+import com.wallet.dto.DepositRequest;
 import com.wallet.dto.TransferRequest;
-import com.wallet.entity.Currency;
-import com.wallet.entity.User;
-import com.wallet.entity.Wallet;
+import com.wallet.entity.*;
+import com.wallet.repository.LedgerEntryRepository;
 import com.wallet.repository.TransactionRepository;
 import com.wallet.repository.UserRepository;
 import com.wallet.repository.WalletRepository;
@@ -33,6 +33,12 @@ public class TransferServiceConcurrencyTest {
 
     @Autowired
     private TransactionRepository transactionRepository;
+
+    @Autowired
+    private WalletService walletService;
+
+    @Autowired
+    private LedgerEntryRepository ledgerEntryRepository;
 
     @Test
     void concurrentTransfersShouldNotDeadlock() throws Exception {
@@ -292,5 +298,101 @@ public class TransferServiceConcurrencyTest {
                         .count();
 
         assertEquals(1, transactionCount);
+    }
+
+    @Test
+    void depositShouldIncreaseWalletBalanceAndCreateCreditLedgerEntry() {
+
+        String testId = UUID.randomUUID().toString();
+
+        User user = userRepository.save(
+                new User(
+                        "Deposit Test User",
+                        "deposit-" + testId + "@example.com"
+                )
+        );
+
+        Wallet wallet = walletRepository.save(
+                new Wallet(user, Currency.INR)
+        );
+
+        DepositRequest request = new DepositRequest(
+                new BigDecimal("500.00"),
+                "deposit-test-" + testId
+        );
+
+        Transaction transaction =
+                walletService.deposit(wallet.getId(), request);
+
+        Wallet updatedWallet =
+                walletRepository.findById(wallet.getId())
+                        .orElseThrow();
+
+        assertEquals(
+                0,
+                new BigDecimal("500.00")
+                        .compareTo(updatedWallet.getBalance())
+        );
+
+        List<LedgerEntry> entries =
+                ledgerEntryRepository.findByTransactionId(
+                        transaction.getId()
+                );
+
+        assertEquals(1, entries.size());
+
+        LedgerEntry entry = entries.get(0);
+
+        assertEquals(
+                LedgerEntryType.CREDIT,
+                entry.getEntryType()
+        );
+
+        assertEquals(
+                0,
+                new BigDecimal("500.00")
+                        .compareTo(entry.getAmount())
+        );
+
+        assertEquals(
+                transaction.getId(),
+                entry.getTransaction().getId()
+        );
+    }
+
+
+    @Test
+    void walletBalanceShouldMatchLedgerBalance() {
+
+        List<Wallet> wallets = walletRepository.findAll();
+
+        for (Wallet wallet : wallets) {
+
+            BigDecimal ledgerBalance =
+                    ledgerEntryRepository
+                            .findAllByWalletIdWithTransaction(wallet.getId())
+                            .stream()
+                            .map(entry -> {
+                                if (entry.getEntryType()
+                                        == LedgerEntryType.CREDIT) {
+
+                                    return entry.getAmount();
+
+                                }
+
+                                return entry.getAmount().negate();
+                            })
+                            .reduce(
+                                    BigDecimal.ZERO,
+                                    BigDecimal::add
+                            );
+
+            assertEquals(
+                    0,
+                    wallet.getBalance().compareTo(ledgerBalance),
+                    "Wallet balance does not match ledger balance for wallet "
+                            + wallet.getId()
+            );
+        }
     }
 }

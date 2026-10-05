@@ -2,6 +2,7 @@ package com.wallet.controller;
 
 
 import com.wallet.dto.TransactionResponse;
+import com.wallet.dto.WalletTransactionResponse;
 import com.wallet.service.TransactionService;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -52,5 +53,16 @@ public class TransactionController {
                         transaction.getCreatedAt()
                 )
                 );
+    }
+
+    @GetMapping("/wallet/{walletId}/statement")
+    public Page<WalletTransactionResponse> getWalletStatement(
+            @PathVariable Long walletId,
+            Pageable pageable
+    ) {
+        return transactionService.getWalletStatement(
+                walletId,
+                pageable
+        );
     }
 }
