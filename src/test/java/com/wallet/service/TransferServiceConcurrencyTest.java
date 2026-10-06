@@ -10,6 +10,7 @@ import com.wallet.repository.WalletRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.ActiveProfiles;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -20,6 +21,7 @@ import java.util.concurrent.*;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 @SpringBootTest
+@ActiveProfiles("test")
 public class TransferServiceConcurrencyTest {
 
     @Autowired
@@ -55,26 +57,44 @@ public class TransferServiceConcurrencyTest {
                 "concurrency2-" + testId + "@example.com"
         ));
 
-        Wallet wallet1 = walletRepository.save(new Wallet(
-                user1, Currency.INR
-        ));
-        Wallet wallet2 = walletRepository.save(new Wallet(
-                user2, Currency.INR
-        ));
+        Wallet wallet1 = walletRepository.save(
+                new Wallet(user1, Currency.INR)
+        );
 
-        wallet1.setBalance(new BigDecimal("1000.00"));
-        wallet2.setBalance(new BigDecimal("1000.00"));
+        Wallet wallet2 = walletRepository.save(
+                new Wallet(user2, Currency.INR)
+        );
 
-        walletRepository.save(wallet1);
-        walletRepository.save(wallet2);
+        walletService.deposit(
+                wallet1.getId(),
+                new DepositRequest(
+                        new BigDecimal("1000.00"),
+                        "concurrency-opening-1-" + testId
+                )
+        );
 
-        String idempotencyKey = "test-key-" + testId;
+        walletService.deposit(
+                wallet2.getId(),
+                new DepositRequest(
+                        new BigDecimal("1000.00"),
+                        "concurrency-opening-2-" + testId
+                )
+        );
 
-        ExecutorService executorService = Executors.newFixedThreadPool(2);
+        String idempotencyKey1 =
+                "concurrent-transfer-1-" + testId;
 
-        CountDownLatch startSignal = new CountDownLatch(1);
+        String idempotencyKey2 =
+                "concurrent-transfer-2-" + testId;
+
+        ExecutorService executorService =
+                Executors.newFixedThreadPool(2);
+
+        CountDownLatch startSignal =
+                new CountDownLatch(1);
 
         Callable<Void> transfer1 = () -> {
+
             startSignal.await();
 
             transferService.transfer(
@@ -82,13 +102,15 @@ public class TransferServiceConcurrencyTest {
                             wallet1.getId(),
                             wallet2.getId(),
                             new BigDecimal("100.00"),
-                            idempotencyKey
+                            idempotencyKey1
                     )
             );
+
             return null;
         };
 
-        Callable<Void> transfer2 = () ->  {
+        Callable<Void> transfer2 = () -> {
+
             startSignal.await();
 
             transferService.transfer(
@@ -96,14 +118,18 @@ public class TransferServiceConcurrencyTest {
                             wallet2.getId(),
                             wallet1.getId(),
                             new BigDecimal("100.00"),
-                            idempotencyKey
+                            idempotencyKey2
                     )
             );
+
             return null;
         };
 
-        Future<Void> future1 = executorService.submit(transfer1);
-        Future<Void> future2 = executorService.submit(transfer2);
+        Future<Void> future1 =
+                executorService.submit(transfer1);
+
+        Future<Void> future2 =
+                executorService.submit(transfer2);
 
         startSignal.countDown();
 
@@ -112,17 +138,24 @@ public class TransferServiceConcurrencyTest {
 
         executorService.shutdown();
 
-        Wallet finalWallet1 = walletRepository.findById(wallet1.getId()).orElseThrow(null);
-        Wallet finalWallet2 = walletRepository.findById(wallet2.getId()).orElseThrow(null);
+        Wallet finalWallet1 =
+                walletRepository.findById(wallet1.getId())
+                        .orElseThrow();
+
+        Wallet finalWallet2 =
+                walletRepository.findById(wallet2.getId())
+                        .orElseThrow();
 
         assertEquals(
                 0,
-                new BigDecimal("1000.00").compareTo(finalWallet1.getBalance())
+                new BigDecimal("1000.00")
+                        .compareTo(finalWallet1.getBalance())
         );
 
         assertEquals(
                 0,
-                new BigDecimal("1000.00").compareTo(finalWallet2.getBalance())
+                new BigDecimal("1000.00")
+                        .compareTo(finalWallet2.getBalance())
         );
     }
 
@@ -153,29 +186,35 @@ public class TransferServiceConcurrencyTest {
                 new Wallet(user2, Currency.INR)
         );
 
-        wallet1.setBalance(new BigDecimal("1000.00"));
-        wallet2.setBalance(BigDecimal.ZERO);
-
-        walletRepository.save(wallet1);
-        walletRepository.save(wallet2);
-
-        String idempotencyKey = "test-key-" + testId;
-
-        TransferRequest request = new TransferRequest(
+        walletService.deposit(
                 wallet1.getId(),
-                wallet2.getId(),
-                new BigDecimal("500.00"),
-                idempotencyKey
+                new DepositRequest(
+                        new BigDecimal("1000.00"),
+                        "idempotency-opening-" + testId
+                )
         );
+
+        String idempotencyKey =
+                "test-key-" + testId;
+
+        TransferRequest request =
+                new TransferRequest(
+                        wallet1.getId(),
+                        wallet2.getId(),
+                        new BigDecimal("500.00"),
+                        idempotencyKey
+                );
 
         transferService.transfer(request);
         transferService.transfer(request);
 
         Wallet updatedWallet1 =
-                walletRepository.findById(wallet1.getId()).orElseThrow();
+                walletRepository.findById(wallet1.getId())
+                        .orElseThrow();
 
         Wallet updatedWallet2 =
-                walletRepository.findById(wallet2.getId()).orElseThrow();
+                walletRepository.findById(wallet2.getId())
+                        .orElseThrow();
 
         assertEquals(
                 0,
@@ -230,38 +269,48 @@ public class TransferServiceConcurrencyTest {
                 new Wallet(user2, Currency.INR)
         );
 
-        wallet1.setBalance(new BigDecimal("1000.00"));
-        wallet2.setBalance(BigDecimal.ZERO);
-
-        walletRepository.save(wallet1);
-        walletRepository.save(wallet2);
-
-        String idempotencyKey = "concurrent-key-" + testId;
-
-        TransferRequest request = new TransferRequest(
+        walletService.deposit(
                 wallet1.getId(),
-                wallet2.getId(),
-                new BigDecimal("500.00"),
-                idempotencyKey
+                new DepositRequest(
+                        new BigDecimal("1000.00"),
+                        "concurrent-idempotency-opening-" + testId
+                )
         );
 
-        ExecutorService executor = Executors.newFixedThreadPool(2);
+        String idempotencyKey =
+                "concurrent-key-" + testId;
 
-        List<Future<?>> futures = new ArrayList<>();
+        TransferRequest request =
+                new TransferRequest(
+                        wallet1.getId(),
+                        wallet2.getId(),
+                        new BigDecimal("500.00"),
+                        idempotencyKey
+                );
 
-        futures.add(executor.submit(() -> {
-            try {
-                transferService.transfer(request);
-            } catch (Exception ignored) {
-            }
-        }));
+        ExecutorService executor =
+                Executors.newFixedThreadPool(2);
 
-        futures.add(executor.submit(() -> {
-            try {
-                transferService.transfer(request);
-            } catch (Exception ignored) {
-            }
-        }));
+        List<Future<?>> futures =
+                new ArrayList<>();
+
+        futures.add(
+                executor.submit(() -> {
+                    try {
+                        transferService.transfer(request);
+                    } catch (Exception ignored) {
+                    }
+                })
+        );
+
+        futures.add(
+                executor.submit(() -> {
+                    try {
+                        transferService.transfer(request);
+                    } catch (Exception ignored) {
+                    }
+                })
+        );
 
         for (Future<?> future : futures) {
             future.get();
@@ -270,10 +319,12 @@ public class TransferServiceConcurrencyTest {
         executor.shutdown();
 
         Wallet updatedWallet1 =
-                walletRepository.findById(wallet1.getId()).orElseThrow();
+                walletRepository.findById(wallet1.getId())
+                        .orElseThrow();
 
         Wallet updatedWallet2 =
-                walletRepository.findById(wallet2.getId()).orElseThrow();
+                walletRepository.findById(wallet2.getId())
+                        .orElseThrow();
 
         assertEquals(
                 0,
@@ -316,13 +367,17 @@ public class TransferServiceConcurrencyTest {
                 new Wallet(user, Currency.INR)
         );
 
-        DepositRequest request = new DepositRequest(
-                new BigDecimal("500.00"),
-                "deposit-test-" + testId
-        );
+        DepositRequest request =
+                new DepositRequest(
+                        new BigDecimal("500.00"),
+                        "deposit-test-" + testId
+                );
 
         Transaction transaction =
-                walletService.deposit(wallet.getId(), request);
+                walletService.deposit(
+                        wallet.getId(),
+                        request
+                );
 
         Wallet updatedWallet =
                 walletRepository.findById(wallet.getId())
@@ -360,24 +415,26 @@ public class TransferServiceConcurrencyTest {
         );
     }
 
-
     @Test
     void walletBalanceShouldMatchLedgerBalance() {
 
-        List<Wallet> wallets = walletRepository.findAll();
+        List<Wallet> wallets =
+                walletRepository.findAll();
 
         for (Wallet wallet : wallets) {
 
             BigDecimal ledgerBalance =
                     ledgerEntryRepository
-                            .findAllByWalletIdWithTransaction(wallet.getId())
+                            .findAllByWalletIdWithTransaction(
+                                    wallet.getId()
+                            )
                             .stream()
                             .map(entry -> {
+
                                 if (entry.getEntryType()
                                         == LedgerEntryType.CREDIT) {
 
                                     return entry.getAmount();
-
                                 }
 
                                 return entry.getAmount().negate();
@@ -389,7 +446,8 @@ public class TransferServiceConcurrencyTest {
 
             assertEquals(
                     0,
-                    wallet.getBalance().compareTo(ledgerBalance),
+                    wallet.getBalance()
+                            .compareTo(ledgerBalance),
                     "Wallet balance does not match ledger balance for wallet "
                             + wallet.getId()
             );
