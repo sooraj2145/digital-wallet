@@ -3,6 +3,7 @@ package com.wallet.service;
 import com.wallet.dto.DepositRequest;
 import com.wallet.dto.TransferRequest;
 import com.wallet.entity.*;
+import com.wallet.exception.InvalidTransferException;
 import com.wallet.repository.LedgerEntryRepository;
 import com.wallet.repository.TransactionRepository;
 import com.wallet.repository.UserRepository;
@@ -13,12 +14,14 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 
 import java.math.BigDecimal;
+import java.sql.Time;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.*;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @SpringBootTest
 @ActiveProfiles("test")
@@ -243,7 +246,7 @@ public class TransferServiceConcurrencyTest {
 
     @Test
     void concurrentRequestsWithSameIdempotencyKeyShouldProcessOnlyOnce()
-            throws InterruptedException, ExecutionException {
+            throws InterruptedException, ExecutionException, TimeoutException {
 
         String testId = UUID.randomUUID().toString();
 
@@ -291,32 +294,31 @@ public class TransferServiceConcurrencyTest {
         ExecutorService executor =
                 Executors.newFixedThreadPool(2);
 
-        List<Future<?>> futures =
-                new ArrayList<>();
+        try {
+            Future<Transaction> future1 =
+                    executor.submit(() ->
+                            transferService.transfer(request)
+                    );
 
-        futures.add(
-                executor.submit(() -> {
-                    try {
-                        transferService.transfer(request);
-                    } catch (Exception ignored) {
-                    }
-                })
-        );
+            Future<Transaction> future2 =
+                    executor.submit(() ->
+                            transferService.transfer(request)
+                    );
 
-        futures.add(
-                executor.submit(() -> {
-                    try {
-                        transferService.transfer(request);
-                    } catch (Exception ignored) {
-                    }
-                })
-        );
+            Transaction transaction1 =
+                    future1.get(10, TimeUnit.SECONDS);
 
-        for (Future<?> future : futures) {
-            future.get();
+            Transaction transaction2 =
+                    future2.get(10, TimeUnit.SECONDS);
+
+            assertEquals(
+                    transaction1.getId(),
+                    transaction2.getId()
+            );
+
+        } finally {
+            executor.shutdown();
         }
-
-        executor.shutdown();
 
         Wallet updatedWallet1 =
                 walletRepository.findById(wallet1.getId())
@@ -452,5 +454,88 @@ public class TransferServiceConcurrencyTest {
                             + wallet.getId()
             );
         }
+    }
+
+
+    @Test
+    void sameIdempotencyKeyWithDifferentRequestShouldBeRejected() {
+
+        String testId = UUID.randomUUID().toString();
+
+        User user1 = userRepository.save(
+                new User(
+                        "Fingerprint User 1",
+                        "fingerprint1-" + testId + "@example.com"
+                )
+        );
+
+        User user2 = userRepository.save(
+                new User(
+                        "Fingerprint User 2",
+                        "fingerprint2-" + testId + "@example.com"
+                )
+        );
+
+        Wallet wallet1 = walletRepository.save(
+                new Wallet(user1, Currency.INR)
+        );
+
+        Wallet wallet2 = walletRepository.save(
+                new Wallet(user2, Currency.INR)
+        );
+
+        walletService.deposit(
+                wallet1.getId(),
+                new DepositRequest(
+                        new BigDecimal("1000.00"),
+                        "fingerprint-opening-" + testId
+                )
+        );
+
+        String idempotencyKey =
+                "fingerprint-key-" + testId;
+
+        TransferRequest firstRequest =
+                new TransferRequest(
+                        wallet1.getId(),
+                        wallet2.getId(),
+                        new BigDecimal("500.00"),
+                        idempotencyKey
+                );
+
+        TransferRequest secondRequest =
+                new TransferRequest(
+                        wallet1.getId(),
+                        wallet2.getId(),
+                        new BigDecimal("400.00"),
+                        idempotencyKey
+                );
+
+        transferService.transfer(firstRequest);
+
+        assertThrows(
+                InvalidTransferException.class,
+                () -> transferService.transfer(secondRequest)
+        );
+
+        Wallet updatedWallet1 =
+                walletRepository.findById(wallet1.getId())
+                        .orElseThrow();
+
+        Wallet updatedWallet2 =
+                walletRepository.findById(wallet2.getId())
+                        .orElseThrow();
+
+        assertEquals(
+                0,
+                new BigDecimal("500.00")
+                        .compareTo(updatedWallet1.getBalance())
+        );
+
+        assertEquals(
+                0,
+                new BigDecimal("500.00")
+                        .compareTo(updatedWallet2.getBalance())
+        );
     }
 }

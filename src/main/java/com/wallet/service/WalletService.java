@@ -19,15 +19,18 @@ public class WalletService {
     private final WalletRepository walletRepository;
     private final TransactionRepository transactionRepository;
     private final LedgerEntryRepository ledgerEntryRepository;
+    private final IdempotencyFingerprintService fingerprintService;
 
     public WalletService(
             WalletRepository walletRepository,
             TransactionRepository transactionRepository,
-            LedgerEntryRepository ledgerEntryRepository
+            LedgerEntryRepository ledgerEntryRepository,
+            IdempotencyFingerprintService fingerprintService
     ) {
         this.walletRepository = walletRepository;
         this.transactionRepository = transactionRepository;
         this.ledgerEntryRepository = ledgerEntryRepository;
+        this.fingerprintService = fingerprintService;
     }
 
     @Transactional
@@ -53,11 +56,19 @@ public class WalletService {
                         )
                 );
 
+        String requestFingerprint =
+                fingerprintService.fingerprintDeposit(
+                        walletId,
+                        request.amount(),
+                        wallet.getCurrency().name()
+                );
+
         Transaction transaction = new Transaction(
                 TransactionType.DEPOSIT,
                 request.amount(),
                 wallet.getCurrency(),
-                request.idempotencyKey()
+                request.idempotencyKey(),
+                requestFingerprint
         );
 
         transactionRepository.save(transaction);

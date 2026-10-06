@@ -32,6 +32,8 @@ public class Transaction {
     @Column(nullable = false, unique = true, length = 100)
     private String idempotencyKey;
 
+    @Column(nullable = false, length = 64)
+    private String requestFingerprint;
 
     @PrePersist
     protected void onCreate() {
@@ -40,11 +42,12 @@ public class Transaction {
 
     public Transaction() {}
 
-    public Transaction(TransactionType type, BigDecimal amount, Currency currency, String idempotencyKey) {
+    public Transaction(TransactionType type, BigDecimal amount, Currency currency, String idempotencyKey, String requestFingerprint) {
         this.type = type;
         this.amount = amount;
         this.currency = currency;
         this.idempotencyKey = idempotencyKey;
+        this.requestFingerprint = requestFingerprint;
     }
 
     public UUID getId() {
@@ -69,6 +72,10 @@ public class Transaction {
 
     public String getIdempotencyKey() {
         return idempotencyKey;
+    }
+
+    public String getRequestFingerprint() {
+        return requestFingerprint;
     }
 
 

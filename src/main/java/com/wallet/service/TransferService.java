@@ -1,62 +1,45 @@
 package com.wallet.service;
 
-
+import com.wallet.dto.TransferRequest;
 import com.wallet.entity.LedgerEntry;
 import com.wallet.entity.LedgerEntryType;
-import com.wallet.exception.IdempotencyConflictException;
+import com.wallet.entity.Transaction;
+import com.wallet.entity.Wallet;
 import com.wallet.exception.InsufficientBalanceException;
 import com.wallet.exception.InvalidTransferException;
 import com.wallet.exception.WalletNotFoundException;
 import com.wallet.repository.LedgerEntryRepository;
-import com.wallet.entity.Currency;
-import com.wallet.entity.Transaction;
-import com.wallet.entity.TransactionType;
-import com.wallet.repository.TransactionRepository;
-import com.wallet.dto.TransferRequest;
-import com.wallet.entity.Wallet;
 import com.wallet.repository.WalletRepository;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import javax.swing.text.html.Option;
 import java.math.BigDecimal;
-import java.util.Optional;
 
 @Service
 public class TransferService {
 
     private final WalletRepository walletRepository;
-    private final TransactionRepository transactionRepository;
     private final LedgerEntryRepository ledgerEntryRepository;
+    private final TransactionCreationService transactionCreationService;
+    private final IdempotencyFingerprintService fingerprintService;
 
     public TransferService(
             WalletRepository walletRepository,
-            TransactionRepository transactionRepository,
-            LedgerEntryRepository ledgerEntryRepository
+            LedgerEntryRepository ledgerEntryRepository,
+            TransactionCreationService transactionCreationService,
+            IdempotencyFingerprintService fingerprintService
     ) {
         this.walletRepository = walletRepository;
-        this.transactionRepository = transactionRepository;
         this.ledgerEntryRepository = ledgerEntryRepository;
+        this.transactionCreationService = transactionCreationService;
+        this.fingerprintService = fingerprintService;
     }
 
     @Transactional
     public Transaction transfer(TransferRequest request) {
 
-
-
-        Optional<Transaction> existingTransaction =
-                transactionRepository.findByIdempotencyKey(
-                        request.idempotencyKey()
-                );
-
-        if (existingTransaction.isPresent()) {
-            return existingTransaction.get();
-        }
-
         Long sourceWalletId = request.sourceWalletId();
         Long destinationWalletId = request.destinationWalletId();
-
 
         if (sourceWalletId.equals(destinationWalletId)) {
             throw new InvalidTransferException(
@@ -64,24 +47,32 @@ public class TransferService {
             );
         }
 
-        Long firstWalletId = Math.min(sourceWalletId, destinationWalletId);
-        Long secondWalletId = Math.max(sourceWalletId, destinationWalletId);
+        Long firstWalletId =
+                Math.min(sourceWalletId, destinationWalletId);
+
+        Long secondWalletId =
+                Math.max(sourceWalletId, destinationWalletId);
 
         Wallet firstWallet = walletRepository
                 .findByIdForUpdate(firstWalletId)
                 .orElseThrow(() ->
-                        new WalletNotFoundException("Wallet not found"));
-
+                        new WalletNotFoundException(
+                                "Wallet not found"
+                        )
+                );
 
         Wallet secondWallet = walletRepository
                 .findByIdForUpdate(secondWalletId)
                 .orElseThrow(() ->
-                        new WalletNotFoundException("Wallet not found"));
+                        new WalletNotFoundException(
+                                "Wallet not found"
+                        )
+                );
 
         Wallet sourceWallet;
         Wallet destinationWallet;
 
-        if(sourceWalletId.equals(firstWalletId)) {
+        if (sourceWalletId.equals(firstWalletId)) {
             sourceWallet = firstWallet;
             destinationWallet = secondWallet;
         } else {
@@ -89,7 +80,9 @@ public class TransferService {
             destinationWallet = firstWallet;
         }
 
-        if (sourceWallet.getCurrency() != destinationWallet.getCurrency()) {
+        if (sourceWallet.getCurrency()
+                != destinationWallet.getCurrency()) {
+
             throw new InvalidTransferException(
                     "Source and destination wallets must use the same currency"
             );
@@ -109,29 +102,37 @@ public class TransferService {
             );
         }
 
-        Transaction transaction = new Transaction(
-                TransactionType.TRANSFER,
-                amount,
-                sourceWallet.getCurrency(),
-                request.idempotencyKey()
-        );
+        String requestFingerprint =
+                fingerprintService.fingerprintTransfer(
+                        sourceWallet.getId(),
+                        destinationWallet.getId(),
+                        amount,
+                        sourceWallet.getCurrency().name()
+                );
 
-        try {
-            transactionRepository.save(transaction);
-        } catch (DataIntegrityViolationException exception) {
-            throw new IdempotencyConflictException(
-                    "A transaction with this idempotency key already exists"
-            );
+        TransactionCreationResult result =
+                transactionCreationService.create(
+                        amount,
+                        sourceWallet.getCurrency(),
+                        request.idempotencyKey(),
+                        requestFingerprint
+                );
+
+
+        if (!result.created()) {
+            return result.transaction();
         }
 
-        LedgerEntry ledgerEntry = new LedgerEntry(
+        Transaction transaction = result.transaction();
+
+        LedgerEntry debitEntry = new LedgerEntry(
                 transaction,
                 sourceWallet,
                 LedgerEntryType.DEBIT,
                 amount
         );
 
-        ledgerEntryRepository.save(ledgerEntry);
+        ledgerEntryRepository.save(debitEntry);
 
         LedgerEntry creditEntry = new LedgerEntry(
                 transaction,
@@ -150,18 +151,6 @@ public class TransferService {
                 destinationWallet.getBalance().add(amount)
         );
 
-
         return transaction;
     }
-
-
-    private Wallet getWalletForUpdate(Long walletId, String walletRole) {
-        return walletRepository
-                .findByIdForUpdate(walletId)
-                .orElseThrow(() -> new WalletNotFoundException(walletRole + " wallet not found."));
-    }
-
-
-
-
 }
