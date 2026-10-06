@@ -7,6 +7,7 @@ import com.wallet.entity.Transaction;
 import com.wallet.service.TransferService;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -24,9 +25,13 @@ public class TransferController {
 
     @PostMapping
     public TransactionResponse createTransfer(
-            @Valid @RequestBody TransferRequest request
+            @Valid @RequestBody TransferRequest request,
+            Authentication authentication
             ) {
-        Transaction transaction = transferService.transfer(request);
+        Transaction transaction = transferService.transfer(
+                request,
+                authentication
+        );
 
         return new TransactionResponse(
                 transaction.getId(),

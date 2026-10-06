@@ -11,6 +11,7 @@ import com.wallet.repository.TransactionRepository;
 import com.wallet.repository.WalletRepository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -25,26 +26,46 @@ public class TransactionService {
     private final TransactionRepository transactionRepository;
     private final WalletRepository walletRepository;
     private final LedgerEntryRepository ledgerEntryRepository;
+    private final AuthenticationService authenticationService;
 
     public TransactionService(
             TransactionRepository transactionRepository,
             WalletRepository walletRepository,
-            LedgerEntryRepository ledgerEntryRepository
+            LedgerEntryRepository ledgerEntryRepository,
+            AuthenticationService authenticationService
     ) {
         this.transactionRepository = transactionRepository;
         this.walletRepository = walletRepository;
         this.ledgerEntryRepository = ledgerEntryRepository;
+        this.authenticationService = authenticationService;
     }
 
-    public Page<Transaction> getTransactions(Pageable pageable) {
-        return transactionRepository.findAll(pageable);
+    public Page<Transaction> getTransactions(
+            Pageable pageable,
+            Authentication authentication
+    ) {
+        Long currentUserId =
+                authenticationService.getCurrentUserId(authentication);
+
+        return transactionRepository.findByUserId(
+                currentUserId,
+                pageable
+        );
     }
 
     public Page<Transaction> getTransactionsByWallet(
             Long walletId,
-            Pageable pageable
+            Pageable pageable,
+            Authentication  authentication
     ) {
-        if (!walletRepository.existsById(walletId)) {
+
+        Long currentUserId = authenticationService.getCurrentUserId(authentication);
+
+
+        if (!walletRepository.findByIdAndUserId(
+                walletId,
+                currentUserId
+        ).isPresent()) {
             throw new WalletNotFoundException(
                     "Wallet not found"
             );
@@ -54,9 +75,18 @@ public class TransactionService {
 
     public Page<WalletTransactionResponse> getWalletStatement(
             Long walletId,
-            Pageable pageable
+            Pageable pageable,
+            Authentication  authentication
     ) {
-        if (!walletRepository.existsById(walletId)) {
+
+        Long currentUserId = authenticationService.getCurrentUserId(authentication);
+
+
+
+        if (!walletRepository.findByIdAndUserId(
+                walletId,
+                currentUserId
+        ).isPresent()) {
             throw new WalletNotFoundException(
                     "Wallet not found"
             );

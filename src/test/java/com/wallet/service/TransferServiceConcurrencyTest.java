@@ -538,4 +538,163 @@ public class TransferServiceConcurrencyTest {
                         .compareTo(updatedWallet2.getBalance())
         );
     }
+
+    @Test
+    void duplicateDepositWithSameIdempotencyKeyShouldNotIncreaseBalanceTwice() {
+
+        User user = userRepository.save(
+                new User(
+                        "Deposit Test User",
+                        "deposit-test-" + System.nanoTime() + "@example.com"
+                )
+        );
+
+        Wallet wallet = walletRepository.save(
+                new Wallet(user, Currency.INR)
+        );
+
+        DepositRequest request = new DepositRequest(
+                new BigDecimal("500.00"),
+                "deposit-idempotency-" + System.nanoTime()
+        );
+
+        walletService.deposit(wallet.getId(), request);
+        walletService.deposit(wallet.getId(), request);
+
+        Wallet updatedWallet =
+                walletRepository.findById(wallet.getId())
+                        .orElseThrow();
+
+        assertEquals(
+                0,
+                updatedWallet.getBalance()
+                        .compareTo(new BigDecimal("500.00"))
+        );
+
+        assertEquals(
+                1,
+                transactionRepository
+                        .findByIdempotencyKey(request.idempotencyKey())
+                        .stream()
+                        .count()
+        );
+    }
+
+    @Test
+    void duplicateDepositWithDifferentAmountShouldBeRejected() {
+
+        User user = userRepository.save(
+                new User(
+                        "Deposit Conflict User",
+                        "deposit-conflict-" + System.nanoTime() + "@example.com"
+                )
+        );
+
+        Wallet wallet = walletRepository.save(
+                new Wallet(user, Currency.INR)
+        );
+
+        String idempotencyKey =
+                "deposit-conflict-" + System.nanoTime();
+
+        walletService.deposit(
+                wallet.getId(),
+                new DepositRequest(
+                        new BigDecimal("500.00"),
+                        idempotencyKey
+                )
+        );
+
+        assertThrows(
+                InvalidTransferException.class,
+                () -> walletService.deposit(
+                        wallet.getId(),
+                        new DepositRequest(
+                                new BigDecimal("700.00"),
+                                idempotencyKey
+                        )
+                )
+        );
+
+        Wallet updatedWallet =
+                walletRepository.findById(wallet.getId())
+                        .orElseThrow();
+
+        assertEquals(
+                0,
+                updatedWallet.getBalance()
+                        .compareTo(new BigDecimal("500.00"))
+        );
+    }
+
+
+    @Test
+    void duplicateDepositWithDifferentWalletShouldBeRejected() {
+
+        String suffix = String.valueOf(System.nanoTime());
+
+        User userA = userRepository.save(
+                new User(
+                        "Deposit Wallet A",
+                        "deposit-wallet-a-" + suffix + "@example.com"
+                )
+        );
+
+        User userB = userRepository.save(
+                new User(
+                        "Deposit Wallet B",
+                        "deposit-wallet-b-" + suffix + "@example.com"
+                )
+        );
+
+        Wallet walletA = walletRepository.save(
+                new Wallet(userA, Currency.INR)
+        );
+
+        Wallet walletB = walletRepository.save(
+                new Wallet(userB, Currency.INR)
+        );
+
+        String idempotencyKey =
+                "deposit-wallet-conflict-" + suffix;
+
+        walletService.deposit(
+                walletA.getId(),
+                new DepositRequest(
+                        new BigDecimal("500.00"),
+                        idempotencyKey
+                )
+        );
+
+        assertThrows(
+                InvalidTransferException.class,
+                () -> walletService.deposit(
+                        walletB.getId(),
+                        new DepositRequest(
+                                new BigDecimal("500.00"),
+                                idempotencyKey
+                        )
+                )
+        );
+
+        Wallet updatedWalletA =
+                walletRepository.findById(walletA.getId())
+                        .orElseThrow();
+
+        Wallet updatedWalletB =
+                walletRepository.findById(walletB.getId())
+                        .orElseThrow();
+
+        assertEquals(
+                0,
+                updatedWalletA.getBalance()
+                        .compareTo(new BigDecimal("500.00"))
+        );
+
+        assertEquals(
+                0,
+                updatedWalletB.getBalance()
+                        .compareTo(BigDecimal.ZERO)
+        );
+    }
 }

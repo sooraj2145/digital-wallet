@@ -6,6 +6,7 @@ import com.wallet.dto.WalletTransactionResponse;
 import com.wallet.service.TransactionService;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -22,10 +23,13 @@ public class TransactionController {
     }
 
     @GetMapping
-    public Page<TransactionResponse> getTransactions(Pageable pageable) {
+    public Page<TransactionResponse> getTransactions(
+            Pageable pageable,
+            Authentication authentication
+    ) {
 
         return transactionService
-                .getTransactions(pageable)
+                .getTransactions(pageable, authentication)
                 .map(transaction -> new TransactionResponse(
                         transaction.getId(),
                         transaction.getType(),
@@ -40,10 +44,14 @@ public class TransactionController {
     @GetMapping("/wallet/{walletId}")
     public Page<TransactionResponse> getTransactionsByWallet(
             @PathVariable Long walletId,
-            Pageable pageable
+            Pageable pageable,
+            Authentication authentication
     ) {
         return transactionService
-                .getTransactionsByWallet(walletId, pageable)
+                .getTransactionsByWallet(
+                        walletId,
+                        pageable,
+                        authentication)
                 .map(transaction -> new TransactionResponse(
                         transaction.getId(),
                         transaction.getType(),
@@ -58,11 +66,13 @@ public class TransactionController {
     @GetMapping("/wallet/{walletId}/statement")
     public Page<WalletTransactionResponse> getWalletStatement(
             @PathVariable Long walletId,
-            Pageable pageable
+            Pageable pageable,
+            Authentication authentication
     ) {
         return transactionService.getWalletStatement(
                 walletId,
-                pageable
+                pageable,
+                authentication
         );
     }
 }

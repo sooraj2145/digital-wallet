@@ -26,4 +26,16 @@ public interface TransactionRepository  extends
             @Param("walletId") Long walletId,
             Pageable pageable
     );
+
+    @Query("""
+    SELECT DISTINCT t
+    FROM Transaction t
+    JOIN LedgerEntry le ON le.transaction = t
+    JOIN Wallet w ON le.wallet = w
+    WHERE w.user.id = :userId
+    """)
+    Page<Transaction> findByUserId(
+            @Param("userId") Long userId,
+            Pageable pageable
+    );
 }

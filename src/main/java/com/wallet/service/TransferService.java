@@ -10,6 +10,7 @@ import com.wallet.exception.InvalidTransferException;
 import com.wallet.exception.WalletNotFoundException;
 import com.wallet.repository.LedgerEntryRepository;
 import com.wallet.repository.WalletRepository;
+import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,21 +23,66 @@ public class TransferService {
     private final LedgerEntryRepository ledgerEntryRepository;
     private final TransactionCreationService transactionCreationService;
     private final IdempotencyFingerprintService fingerprintService;
+    private final AuthenticationService authenticationService;
 
     public TransferService(
             WalletRepository walletRepository,
             LedgerEntryRepository ledgerEntryRepository,
             TransactionCreationService transactionCreationService,
-            IdempotencyFingerprintService fingerprintService
+            IdempotencyFingerprintService fingerprintService,
+            AuthenticationService authenticationService
     ) {
         this.walletRepository = walletRepository;
         this.ledgerEntryRepository = ledgerEntryRepository;
         this.transactionCreationService = transactionCreationService;
         this.fingerprintService = fingerprintService;
+        this.authenticationService = authenticationService;
     }
 
+    /**
+     * Authenticated transfer used by the REST API.
+     *
+     * The authenticated user must own the source wallet.
+     * The destination wallet may belong to another user.
+     */
+    @Transactional
+    public Transaction transfer(
+            TransferRequest request,
+            Authentication authentication
+    ) {
+
+        Long currentUserId =
+                authenticationService.getCurrentUserId(authentication);
+
+        return executeTransfer(
+                request,
+                currentUserId
+        );
+    }
+
+    /**
+     * Internal transfer used by existing service-level tests.
+     *
+     * No HTTP authentication is involved here.
+     */
     @Transactional
     public Transaction transfer(TransferRequest request) {
+
+        return executeTransfer(
+                request,
+                null
+        );
+    }
+
+    /**
+     * Shared transfer implementation.
+     *
+     * currentUserId is null for internal/test calls.
+     */
+    private Transaction executeTransfer(
+            TransferRequest request,
+            Long currentUserId
+    ) {
 
         Long sourceWalletId = request.sourceWalletId();
         Long destinationWalletId = request.destinationWalletId();
@@ -47,6 +93,11 @@ public class TransferService {
             );
         }
 
+        /*
+         * Always lock wallets in ascending ID order.
+         * This prevents deadlocks when concurrent transfers
+         * involve the same pair of wallets.
+         */
         Long firstWalletId =
                 Math.min(sourceWalletId, destinationWalletId);
 
@@ -78,6 +129,18 @@ public class TransferService {
         } else {
             sourceWallet = secondWallet;
             destinationWallet = firstWallet;
+        }
+
+        /*
+         * Authorization applies only to authenticated API requests.
+         *
+         * The source wallet must belong to the authenticated user.
+         * The destination wallet can belong to another user.
+         */
+        if (currentUserId != null &&
+                !sourceWallet.getUser().getId().equals(currentUserId)) {
+
+            throw new WalletNotFoundException("Wallet not found");
         }
 
         if (sourceWallet.getCurrency()
@@ -117,7 +180,6 @@ public class TransferService {
                         request.idempotencyKey(),
                         requestFingerprint
                 );
-
 
         if (!result.created()) {
             return result.transaction();

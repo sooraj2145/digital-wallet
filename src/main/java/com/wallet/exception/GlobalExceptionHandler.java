@@ -70,4 +70,26 @@ public class GlobalExceptionHandler {
                 errorMessage
         );
     }
+
+    @ExceptionHandler(EmailAlreadyRegisteredException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public ApiError handleEmailAlreadyRegistered(
+            EmailAlreadyRegisteredException exception
+    ) {
+        return new ApiError(
+                409,
+                exception.getMessage()
+        );
+    }
+
+    @ExceptionHandler(AuthenticationFailedException.class)
+    @ResponseStatus(HttpStatus.UNAUTHORIZED)
+    public ApiError handleAuthenticationFailed(
+            AuthenticationFailedException exception
+    ) {
+        return new ApiError(
+                401,
+                exception.getMessage()
+        );
+    }
 }

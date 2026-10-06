@@ -3,6 +3,7 @@ package com.wallet.controller;
 
 import com.wallet.service.ReconciliationResult;
 import com.wallet.service.ReconciliationService;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -19,8 +20,12 @@ public class ReconciliationController {
     }
 
     @GetMapping("/wallets/{walletId}")
-    public ReconciliationResult reconcileWallet(@PathVariable Long walletId)  {
-        return reconciliationService.reconcileWallet(walletId);
+    public ReconciliationResult reconcileWallet(
+            @PathVariable Long walletId,
+            Authentication authentication)  {
+        return reconciliationService.reconcileWallet(
+                walletId,
+                authentication);
     }
 
 }
