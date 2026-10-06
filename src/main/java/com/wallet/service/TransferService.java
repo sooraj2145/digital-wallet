@@ -5,11 +5,13 @@ import com.wallet.entity.LedgerEntry;
 import com.wallet.entity.LedgerEntryType;
 import com.wallet.entity.Transaction;
 import com.wallet.entity.Wallet;
+import com.wallet.event.TransactionCompletedEvent;
 import com.wallet.exception.InsufficientBalanceException;
 import com.wallet.exception.InvalidTransferException;
 import com.wallet.exception.WalletNotFoundException;
 import com.wallet.repository.LedgerEntryRepository;
 import com.wallet.repository.WalletRepository;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,19 +26,22 @@ public class TransferService {
     private final TransactionCreationService transactionCreationService;
     private final IdempotencyFingerprintService fingerprintService;
     private final AuthenticationService authenticationService;
+    private final ApplicationEventPublisher eventPublisher;
 
     public TransferService(
             WalletRepository walletRepository,
             LedgerEntryRepository ledgerEntryRepository,
             TransactionCreationService transactionCreationService,
             IdempotencyFingerprintService fingerprintService,
-            AuthenticationService authenticationService
+            AuthenticationService authenticationService,
+            ApplicationEventPublisher eventPublisher
     ) {
         this.walletRepository = walletRepository;
         this.ledgerEntryRepository = ledgerEntryRepository;
         this.transactionCreationService = transactionCreationService;
         this.fingerprintService = fingerprintService;
         this.authenticationService = authenticationService;
+        this.eventPublisher = eventPublisher;
     }
 
     /**
@@ -95,6 +100,7 @@ public class TransferService {
 
         /*
          * Always lock wallets in ascending ID order.
+         *
          * This prevents deadlocks when concurrent transfers
          * involve the same pair of wallets.
          */
@@ -104,21 +110,23 @@ public class TransferService {
         Long secondWalletId =
                 Math.max(sourceWalletId, destinationWalletId);
 
-        Wallet firstWallet = walletRepository
-                .findByIdForUpdate(firstWalletId)
-                .orElseThrow(() ->
-                        new WalletNotFoundException(
-                                "Wallet not found"
-                        )
-                );
+        Wallet firstWallet =
+                walletRepository
+                        .findByIdForUpdate(firstWalletId)
+                        .orElseThrow(() ->
+                                new WalletNotFoundException(
+                                        "Wallet not found"
+                                )
+                        );
 
-        Wallet secondWallet = walletRepository
-                .findByIdForUpdate(secondWalletId)
-                .orElseThrow(() ->
-                        new WalletNotFoundException(
-                                "Wallet not found"
-                        )
-                );
+        Wallet secondWallet =
+                walletRepository
+                        .findByIdForUpdate(secondWalletId)
+                        .orElseThrow(() ->
+                                new WalletNotFoundException(
+                                        "Wallet not found"
+                                )
+                        );
 
         Wallet sourceWallet;
         Wallet destinationWallet;
@@ -140,7 +148,9 @@ public class TransferService {
         if (currentUserId != null &&
                 !sourceWallet.getUser().getId().equals(currentUserId)) {
 
-            throw new WalletNotFoundException("Wallet not found");
+            throw new WalletNotFoundException(
+                    "Wallet not found"
+            );
         }
 
         if (sourceWallet.getCurrency()
@@ -181,27 +191,36 @@ public class TransferService {
                         requestFingerprint
                 );
 
+        /*
+         * Idempotent retry.
+         *
+         * Do not create another ledger entry,
+         * update balances, or publish another
+         * risk-assessment event.
+         */
         if (!result.created()) {
             return result.transaction();
         }
 
         Transaction transaction = result.transaction();
 
-        LedgerEntry debitEntry = new LedgerEntry(
-                transaction,
-                sourceWallet,
-                LedgerEntryType.DEBIT,
-                amount
-        );
+        LedgerEntry debitEntry =
+                new LedgerEntry(
+                        transaction,
+                        sourceWallet,
+                        LedgerEntryType.DEBIT,
+                        amount
+                );
 
         ledgerEntryRepository.save(debitEntry);
 
-        LedgerEntry creditEntry = new LedgerEntry(
-                transaction,
-                destinationWallet,
-                LedgerEntryType.CREDIT,
-                amount
-        );
+        LedgerEntry creditEntry =
+                new LedgerEntry(
+                        transaction,
+                        destinationWallet,
+                        LedgerEntryType.CREDIT,
+                        amount
+                );
 
         ledgerEntryRepository.save(creditEntry);
 
@@ -211,6 +230,20 @@ public class TransferService {
 
         destinationWallet.setBalance(
                 destinationWallet.getBalance().add(amount)
+        );
+
+        /*
+         * Publish an event instead of performing anomaly detection
+         * directly inside the financial transaction.
+         *
+         * TransactionRiskAssessmentListener handles this event
+         * AFTER the transfer transaction successfully commits.
+         */
+        eventPublisher.publishEvent(
+                new TransactionCompletedEvent(
+                        transaction.getId(),
+                        sourceWallet.getId()
+                )
         );
 
         return transaction;

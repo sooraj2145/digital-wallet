@@ -40,4 +40,15 @@ public interface LedgerEntryRepository
     List<LedgerEntry> findAllByWalletIdWithTransaction(
             @Param("walletId") Long walletId
     );
+
+    @Query("""
+    SELECT CASE WHEN COUNT(le) > 0 THEN true ELSE false END
+    FROM LedgerEntry le
+    WHERE le.transaction.id = :transactionId
+      AND le.wallet.user.id = :userId
+    """)
+    boolean existsByTransactionIdAndUserId(
+            @Param("transactionId") UUID transactionId,
+            @Param("userId") Long userId
+    );
 }

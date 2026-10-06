@@ -92,4 +92,16 @@ public class GlobalExceptionHandler {
                 exception.getMessage()
         );
     }
+
+
+    @ExceptionHandler(GeminiServiceException.class)
+    @ResponseStatus(HttpStatus.SERVICE_UNAVAILABLE)
+    public ApiError handleGeminiServiceException(
+            GeminiServiceException exception
+    ) {
+        return new ApiError(
+                503,
+                exception.getMessage()
+        );
+    }
 }
